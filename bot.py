@@ -3,7 +3,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
+    CallbackQueryHandler,  # Added this import to fix the NameError
     ConversationHandler,
     ContextTypes,
     filters,
@@ -183,9 +183,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "success": success,
         "failed": fail
     }
-    with open("attack_log.json", "a") as f:
-        json.dump(log_entry, f)
-        f.write("\n")
+    try:
+        with open("attack_log.json", "a") as f:
+            json.dump(log_entry, f)
+            f.write("\n")
+    except Exception as e:
+        logger.error(f"Failed to write to log file: {e}")
 
     await query.message.reply_text(
         f"🖤 *Attack Complete!*\n"
