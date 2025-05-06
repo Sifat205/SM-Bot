@@ -7,7 +7,7 @@ from datetime import datetime
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 # Bot token
-TOKEN = "7619796671:AAFLnz5d1SSh1jhJakaoR7Ny9dXNWMT_0qA"
+TOKEN = "7619796671:AAE73B3sD3bDYKCTCoTn1GYFcOcpuZOJcpc"
 ADMIN_ID = None  # Admin ID blank rakha holo, tui pore set korte parbi
 
 # Initialize bot
