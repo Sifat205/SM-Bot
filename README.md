@@ -24,4 +24,4 @@
    git clone https://github.com/Sifat205/SM-Bot.git
    cd SM-Bot
    pip install -r requirements.txt
-   python sm-bot.py
+   python bot.py
